@@ -64,7 +64,7 @@ export const login = async (req: Request, res: Response) => {
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'none',
             maxAge: 3600000, // 1 hour
-            path: '/',
+            // path: '/',
         }).send('Logged in successfully');
     } catch (error) {
         res.status(500).send('Server error');
@@ -77,7 +77,7 @@ export const logout = (req: Request, res: Response) => {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'none',
-        path: '/', 
+        // path: '/', 
     });
 
     res.status(200).json({ message: 'Logged out successfully' });
