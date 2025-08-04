@@ -13,9 +13,9 @@ declare global {
 export const protect = async (req: Request, res: Response, next: NextFunction) => {
     let token;
 
-    if (req.cookies.token) {
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
-            token = req.cookies.token;
+            token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as { id: string };
 
             const user = await User.findById(decoded.id).select('-password');

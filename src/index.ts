@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import cookieParser from 'cookie-parser';
+
 import cors from 'cors';
 
 dotenv.config();
@@ -16,9 +16,9 @@ if (!mongoUri) {
 }
 
 app.use(express.json());
-app.use(cookieParser());
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5500',
+  origin: process.env.CLIENT_URL,
     credentials: true,
 }));
 

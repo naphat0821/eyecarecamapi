@@ -59,26 +59,13 @@ export const login = async (req: Request, res: Response) => {
             expiresIn: '1h',
         });
 
-        res.cookie('token', token, {
-            httpOnly: true,
-            secure: true, //process.env.NODE_ENV === 'production'
-            sameSite: 'none',
-            maxAge: 3600000, // 1 hour
-            path: '/',
-        }).send('Logged in successfully');
+        res.status(200).json({ token });
     } catch (error) {
         res.status(500).send('Server error');
     }
 };
 
 export const logout = (req: Request, res: Response) => {
-    res.clearCookie('token', {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none',
-        path: '/', 
-    });
-
     res.status(200).json({ message: 'Logged out successfully' });
 };
 
