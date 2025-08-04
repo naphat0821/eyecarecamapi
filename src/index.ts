@@ -27,8 +27,10 @@ mongoose.connect(mongoUri)
   .catch(err => console.error('MongoDB connection error:', err));
 
 import authRoutes from './routes/auth';
+import sessionRoutes from './routes/session';
 
 app.use('/api/auth', authRoutes);
+app.use('/api/session', sessionRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('API is running');
