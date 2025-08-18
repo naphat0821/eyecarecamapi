@@ -1,3 +1,4 @@
+import { timeStamp } from 'console';
 import { any } from 'joi';
 import mongoose, { Schema, Document } from 'mongoose';
 
@@ -50,6 +51,8 @@ const SessionSchema: Schema = new Schema({
     },
     logs: { type: [Schema.Types.Mixed], required: true },
   }
+}, {
+  timestamps: true,
 });
 
 export default mongoose.model<SessionData>('Session', SessionSchema);
