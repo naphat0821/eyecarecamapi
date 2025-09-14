@@ -56,25 +56,76 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid userId" });
     }
 
-    const now = new Date();
-    console.log("thisweek func")
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
+    // Last 7 days including today
+    const endDate = new Date();
+    endDate.setHours(23, 59, 59, 999);
 
-    const endOfWeek = new Date(now);
-    endOfWeek.setDate(now.getDate() - now.getDay() + 6);
-    endOfWeek.setHours(23, 59, 59, 999);
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 6);
+    startDate.setHours(0, 0, 0, 0);
 
     const sessions = await Session.find({
       userId,
       createdAt: {
-        $gte: startOfWeek,
-        $lte: endOfWeek,
+        $gte: startDate,
+        $lte: endDate,
       },
+    }).sort({ createdAt: 1 });
+
+    const weekUsage = sessions.length;
+
+    // unigue วันทั้งหมด
+    const uniqueDays = [...new Set(sessions.map(session => session.createdAt.toISOString().split('T')[0]))];
+
+    //Usage //end-start
+    const sumHourUsage = sessions.reduce((acc, session) => acc + (session.data.endAt - session.data.startAt), 0) / 3600000; // ms to hr //eg. 0.04 hour 
+    const avgHourUsage = sumHourUsage / uniqueDays.length
+
+    // onScreenTime (hours)
+    const sumHourOnscreen = sessions.reduce((acc, session) => {
+      const perSessionMs = (session.data.sit.sitted || []).reduce((sum: number, sit: any) => {
+        const start = sit?.start ?? 0;
+        const end = sit?.end ?? 0;
+        return sum + (end - start);
+      }, 0);
+      return acc + perSessionMs;
+    }, 0) / 3600000;
+    const avgHourOnscreen = sumHourOnscreen / uniqueDays.length
+
+    const onScreenObj = sessions.map((session) => {
+      const perSessionMs = (session.data.sit.sitted || []).map((sit: any) => {
+        const start = sit?.start ?? 0;
+        const end = sit?.end ?? 0;
+        return {msDuration: end - start, start, end};
+      });
+
+      return perSessionMs
+
+    }).flat()
+    const mostMsOnscreen = onScreenObj.reduce((prev, current) => {
+      return (prev.msDuration > current.msDuration) ? prev : current;
     });
 
-    res.status(200).json(sessions);
+    //blink
+    const sumMinOnscreen = sumHourOnscreen * 60
+    const sumBlink = sessions.reduce((acc, session) => acc + session.data.blinkCount, 0)
+    const avgBlinkPerMin = sumBlink / sumMinOnscreen
+
+    const payload = {
+      weekUsage,
+      uniqueDays,
+      sumHourUsage,
+      avgHourUsage,
+      sumHourOnscreen,
+      avgHourOnscreen,
+      sumMinOnscreen,
+      sumBlink,
+      avgBlinkPerMin,
+      mostMsOnscreen,
+      mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000
+    }
+
+    res.status(200).json(payload);
   } catch (error) {
     console.error("Get this week data error:", error);
     res.status(500).json({
@@ -91,21 +142,19 @@ export const getSessionsByDate = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid userId or date' });
     }
 
-    // แปลง "2025-08-18" → Date object
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
 
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // query โดยใช้ createdAt (Date object ใน MongoDB)
     const sessions = await Session.find({
       userId,
       createdAt: {
         $gte: startOfDay,
         $lte: endOfDay,
       },
-    });
+    }).sort({ createdAt: 1 });
 
     res.status(200).json(sessions);
   } catch (error) {

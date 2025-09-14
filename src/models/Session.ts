@@ -1,9 +1,7 @@
-import { timeStamp } from 'console';
-import { any } from 'joi';
 import mongoose, { Schema, Document } from 'mongoose';
 
 
-interface SessionData extends Document {
+export interface SessionData extends Document {
   userId: mongoose.Types.ObjectId;
   data: {
     startAt: number;
@@ -25,7 +23,9 @@ interface SessionData extends Document {
       badCount: number;
     };
     logs: any[];
-  }
+  };
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const SessionSchema: Schema = new Schema({
