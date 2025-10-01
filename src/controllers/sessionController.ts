@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import Session from '../models/Session';
+import Session, { SessionData } from '../models/Session';
 import mongoose from 'mongoose';
 
 
@@ -49,6 +49,20 @@ export const getSessionsByUserId = async (req: Request, res: Response) => {
   }
 };
 
+const getChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => {
+  if (!sessions?.length) return [];
+
+  const countsByDay = sessions.reduce((map, session) => {
+    const day = session.createdAt.toISOString().slice(0, 10);
+    map.set(day, (map.get(day) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  console.log(countsByDay)
+  return Array.from(countsByDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([x, y]) => ({ x, y }));
+}
+
 export const getThisWeekData = async (req: Request, res: Response) => {
   try {
     const { userId } = req.body;
@@ -72,7 +86,12 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       },
     }).sort({ createdAt: 1 });
 
+    if (!sessions.length) {
+      return res.status(404).json({message: "Session not found or dont have"})
+    }
+
     const weekUsage = sessions.length;
+    const dailyChartSeries = getChartSeries(sessions)
 
     // unigue วันทั้งหมด
     const uniqueDays = [...new Set(sessions.map(session => session.createdAt.toISOString().split('T')[0]))];
@@ -92,19 +111,25 @@ export const getThisWeekData = async (req: Request, res: Response) => {
     }, 0) / 3600000;
     const avgHourOnscreen = sumHourOnscreen / uniqueDays.length
 
-    const onScreenObj = sessions.map((session) => {
+    type onScreenType = {
+      msDuration: number,
+      start:number,
+      end:number,
+    }
+    const onScreenObj: onScreenType[]  = sessions.map((session) => {
       const perSessionMs = (session.data.sit.sitted || []).map((sit: any) => {
         const start = sit?.start ?? 0;
         const end = sit?.end ?? 0;
-        return {msDuration: end - start, start, end};
+        return { msDuration: end - start, start, end };
       });
 
       return perSessionMs
 
     }).flat()
-    const mostMsOnscreen = onScreenObj.reduce((prev, current) => {
-      return (prev.msDuration > current.msDuration) ? prev : current;
-    });
+
+    const mostMsOnscreen = onScreenObj.length
+      ? onScreenObj.reduce((prev, current) => (prev.msDuration > current.msDuration ? prev : current))
+      : { msDuration: 0, start: 0, end: 0 };
 
     //blink
     const sumMinOnscreen = sumHourOnscreen * 60
@@ -122,7 +147,8 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       sumBlink,
       avgBlinkPerMin,
       mostMsOnscreen,
-      mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000
+      mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000,
+      dailyChartSeries,
     }
 
     res.status(200).json(payload);

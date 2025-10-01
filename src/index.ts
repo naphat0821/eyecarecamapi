@@ -24,7 +24,10 @@ app.use(cors({
 }));
 
 mongoose.connect(mongoUri)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected')
+    console.log('DB name:', mongoose.connection.name);
+  })
   .catch(err => console.error('MongoDB connection error:', err));
 
 import authRoutes from './routes/auth';
