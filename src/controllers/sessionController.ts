@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import Session, { SessionData } from '../models/Session';
 import mongoose from 'mongoose';
 
+import moment from "moment-timezone";
+
+
 
 export const insertData = async (req: Request, res: Response) => {
   try {
@@ -49,7 +52,7 @@ export const getSessionsByUserId = async (req: Request, res: Response) => {
   }
 };
 
-const getChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => {
+const getChartSeriesOld = (sessions: SessionData[]): { x: string; y: number }[] => {
   if (!sessions?.length) return [];
 
   const countsByDay = sessions.reduce((map, session) => {
@@ -63,7 +66,28 @@ const getChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => 
     .map(([x, y]) => ({ x, y }));
 }
 
-export const getThisWeekData = async (req: Request, res: Response) => {
+const getChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => {
+  if (!sessions?.length) return [];
+
+  const usageByDay = sessions.reduce((map, session) => {
+    const createdAt = new Date(session.createdAt);
+
+    // ปรับเวลาเป็น local timezone (ไทย +7)
+    const localDate = new Date(createdAt.getTime() + (7 * 60 * 60 * 1000));
+
+    const day = localDate.toISOString().slice(0, 10);
+
+    map.set(day, (map.get(day) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+
+  return Array.from(usageByDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([x, y]) => ({ x, y }));
+};
+
+
+export const getThisWeekDataOld = async (req: Request, res: Response) => {
   try {
     const { userId } = req.body;
     if (!userId) {
@@ -161,6 +185,99 @@ export const getThisWeekData = async (req: Request, res: Response) => {
   }
 };
 
+export const getThisWeekData = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
+    // thai timezone last 7 days
+    const endDate = moment.tz("Asia/Bangkok").endOf("day").toDate();
+    const startDate = moment.tz("Asia/Bangkok").subtract(6, "days").startOf("day").toDate();
+
+    console.log("Start of Week:", startDate.toISOString());
+    console.log("End of Week:", endDate.toISOString());
+
+    const sessions = await Session.find({
+      userId,
+      createdAt: { $gte: startDate, $lte: endDate },
+    }).sort({ createdAt: 1 });
+
+    if (!sessions.length) {
+      return res.status(404).json({ message: "No session found this week" });
+    }
+
+  
+    const weekUsage = sessions.length;
+
+    // all unique days in this week
+    const uniqueDays = [...new Set(
+      sessions.map(s => s.createdAt.toISOString().split("T")[0])
+    )];
+
+    
+    const sumHourUsage =
+      sessions.reduce((acc, s) => acc + ((s.data.endAt ?? 0) - (s.data.startAt ?? 0)), 0) / 3600000;
+
+    const avgHourUsage = sumHourUsage / uniqueDays.length;
+
+    // sum on-screen time (hours)
+    const sumHourOnscreen =
+      sessions.reduce((acc, s) => {
+        const totalSitMs = (s.data.sit?.sitted || []).reduce(
+          (sum: number, sit: any) => sum + ((sit.end ?? 0) - (sit.start ?? 0)),
+          0
+        );
+        return acc + totalSitMs;
+      }, 0) / 3600000;
+
+    const avgHourOnscreen = sumHourOnscreen / uniqueDays.length;
+
+    const onScreenObj = sessions.flatMap((s) =>
+      (s.data.sit?.sitted || []).map((sit: any) => ({
+        msDuration: (sit.end ?? 0) - (sit.start ?? 0),
+        start: sit.start ?? 0,
+        end: sit.end ?? 0,
+      }))
+    );
+
+    const mostMsOnscreen = onScreenObj.length
+      ? onScreenObj.reduce((max, cur) => (cur.msDuration > max.msDuration ? cur : max))
+      : { msDuration: 0, start: 0, end: 0 };
+
+    const sumMinOnscreen = sumHourOnscreen * 60;
+    const sumBlink = sessions.reduce((acc, s) => acc + (s.data.blinkCount ?? 0), 0);
+    const avgBlinkPerMin = sumMinOnscreen > 0 ? sumBlink / sumMinOnscreen : 0;
+
+    const dailyChartSeries = getChartSeries(sessions);
+
+    // ==========================
+    const payload = {
+      weekUsage,
+      uniqueDays,
+      sumHourUsage,
+      avgHourUsage,
+      sumHourOnscreen,
+      avgHourOnscreen,
+      sumMinOnscreen,
+      sumBlink,
+      avgBlinkPerMin,
+      mostMsOnscreen,
+      mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000,
+      dailyChartSeries,
+    };
+
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error("Get this week data error:", error);
+    res.status(500).json({
+      message: "Error getting this week data",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
 export const getSessionsByDateOld = async (req: Request, res: Response) => {
   try {
     const { userId, date } = req.body;
@@ -198,7 +315,6 @@ export const getSessionsByDateOld = async (req: Request, res: Response) => {
   }
 };
 
-import moment from "moment-timezone";
 
 export const getSessionsByDate = async (req: Request, res: Response) => {
   try {
