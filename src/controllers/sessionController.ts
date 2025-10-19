@@ -161,18 +161,24 @@ export const getThisWeekData = async (req: Request, res: Response) => {
   }
 };
 
-export const getSessionsByDate = async (req: Request, res: Response) => {
+export const getSessionsByDateOld = async (req: Request, res: Response) => {
   try {
     const { userId, date } = req.body;
     if (!userId || !date) {
       return res.status(400).json({ message: 'Invalid userId or date' });
     }
 
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
+    // const startOfDay = new Date(date);
+    // startOfDay.setHours(0, 0, 0, 0);
 
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    // const endOfDay = new Date(date);
+    // endOfDay.setHours(23, 59, 59, 999);
+    // console.log('raw date:', date);
+    // console.log('Start of Day:', startOfDay);
+    // console.log('End of Day:', endOfDay);
+
+    const startOfDay = new Date(`${date}T00:00:00+07:00`);
+    const endOfDay = new Date(`${date}T23:59:59.999+07:00`);
 
     const sessions = await Session.find({
       userId,
@@ -187,6 +193,37 @@ export const getSessionsByDate = async (req: Request, res: Response) => {
     console.error('Get sessions by date error:', error);
     res.status(500).json({
       message: 'Error getting sessions by date',
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+import moment from "moment-timezone";
+
+export const getSessionsByDate = async (req: Request, res: Response) => {
+  try {
+    const { userId, date } = req.body;
+    if (!userId || !date) {
+      return res.status(400).json({ message: "Invalid userId or date" });
+    }
+
+    const startOfDay = moment.tz(date, "Asia/Bangkok").startOf("day").toDate();
+    const endOfDay = moment.tz(date, "Asia/Bangkok").endOf("day").toDate();
+
+    console.log("Raw date:", date);
+    console.log("Start of Day (local):", startOfDay);
+    console.log("End of Day (local):", endOfDay);
+
+    const sessions = await Session.find({
+      userId,
+      createdAt: { $gte: startOfDay, $lte: endOfDay },
+    }).sort({ createdAt: 1 });
+
+    res.status(200).json(sessions);
+  } catch (error) {
+    console.error("Get sessions by date error:", error);
+    res.status(500).json({
+      message: "Error getting sessions by date",
       error: error instanceof Error ? error.message : error,
     });
   }
