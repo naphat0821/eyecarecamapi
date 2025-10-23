@@ -6,8 +6,8 @@ const router = Router();
 
 router.post('/add', protect, insertData);
 router.get('/:userId', protect, getSessionsByUserId);
-router.post('/week', getThisWeekData);
-router.post('/date', getSessionsByDate);
-router.post('/today', getTodayData);
+router.post('/week', protect, getThisWeekData);
+router.post('/date', protect, getSessionsByDate);
+router.post('/today', protect, getTodayData);
 
 export default router;
