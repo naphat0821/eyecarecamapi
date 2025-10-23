@@ -4,7 +4,11 @@ import mongoose from 'mongoose';
 
 import moment from "moment-timezone";
 
-
+import { getBlinkRisk } from '../utils/blink';
+import { getDistanceRisk } from '../utils/onscreenDistance';
+import { getOnscreenRisk, getSitMaxRisk } from '../utils/sit';
+import { getNeckPostureRisk } from '../utils/neck';
+import { getNotMoveRisk } from '../utils/move';
 
 export const insertData = async (req: Request, res: Response) => {
   try {
@@ -70,13 +74,7 @@ const getChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => 
   if (!sessions?.length) return [];
 
   const usageByDay = sessions.reduce((map, session) => {
-    const createdAt = new Date(session.createdAt);
-
-    // ปรับเวลาเป็น local timezone (ไทย +7)
-    const localDate = new Date(createdAt.getTime() + (7 * 60 * 60 * 1000));
-
-    const day = localDate.toISOString().slice(0, 10);
-
+    const day = moment(session.createdAt).tz("Asia/Bangkok").format("YYYY-MM-DD");
     map.set(day, (map.get(day) ?? 0) + 1);
     return map;
   }, new Map<string, number>());
@@ -111,7 +109,7 @@ export const getThisWeekDataOld = async (req: Request, res: Response) => {
     }).sort({ createdAt: 1 });
 
     if (!sessions.length) {
-      return res.status(404).json({message: "Session not found or dont have"})
+      return res.status(404).json({ message: "Session not found or dont have" })
     }
 
     const weekUsage = sessions.length;
@@ -137,10 +135,10 @@ export const getThisWeekDataOld = async (req: Request, res: Response) => {
 
     type onScreenType = {
       msDuration: number,
-      start:number,
-      end:number,
+      start: number,
+      end: number,
     }
-    const onScreenObj: onScreenType[]  = sessions.map((session) => {
+    const onScreenObj: onScreenType[] = sessions.map((session) => {
       const perSessionMs = (session.data.sit.sitted || []).map((sit: any) => {
         const start = sit?.start ?? 0;
         const end = sit?.end ?? 0;
@@ -185,6 +183,39 @@ export const getThisWeekDataOld = async (req: Request, res: Response) => {
   }
 };
 
+const getNeckPostureChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => {
+  if (!sessions?.length) return [];
+
+  const neckBadCountByDay = sessions.reduce((map, session) => {
+    const day = moment(session.createdAt).tz("Asia/Bangkok").format("YYYY-MM-DD");
+    const neckBadCount = session.data.neck?.neckBadCount ?? 0;
+    map.set(day, (map.get(day) ?? 0) + neckBadCount);
+    return map;
+  }, new Map<string, number>());
+
+  return Array.from(neckBadCountByDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([x, y]) => ({ x, y }));
+};
+
+const getOnScreenTimeChartSeries = (sessions: SessionData[]): { x: string; y: number }[] => {
+  if (!sessions?.length) return [];
+
+  const onScreenTimeByDay = sessions.reduce((map, session) => {
+    const day = moment(session.createdAt).tz("Asia/Bangkok").format("YYYY-MM-DD");
+    const sessionOnScreenTime = (session.data.sit?.sitted || []).reduce(
+      (sum: number, sit: any) => sum + ((sit.end ?? 0) - (sit.start ?? 0)),
+      0
+    );
+    map.set(day, (map.get(day) ?? 0) + sessionOnScreenTime);
+    return map;
+  }, new Map<string, number>());
+
+  return Array.from(onScreenTimeByDay.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([x, y]) => ({ x, y: y / 60000 })); // convert ms to minutes
+};
+
 export const getThisWeekData = async (req: Request, res: Response) => {
   try {
     const { userId } = req.body;
@@ -208,7 +239,7 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "No session found this week" });
     }
 
-  
+
     const weekUsage = sessions.length;
 
     // all unique days in this week
@@ -216,9 +247,12 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       sessions.map(s => s.createdAt.toISOString().split("T")[0])
     )];
 
-    
+
     const sumHourUsage =
       sessions.reduce((acc, s) => acc + ((s.data.endAt ?? 0) - (s.data.startAt ?? 0)), 0) / 3600000;
+
+    const sumNotMove = sessions.reduce((acc, s) => acc + (s.data.move.notMoveMaxCount ?? 0), 0);
+    const sumMaxSitting = sessions.reduce((acc, s) => acc + (s.data.sit.sitMaxTimeCount ?? 0), 0);
 
     const avgHourUsage = sumHourUsage / uniqueDays.length;
 
@@ -251,9 +285,17 @@ export const getThisWeekData = async (req: Request, res: Response) => {
     const avgBlinkPerMin = sumMinOnscreen > 0 ? sumBlink / sumMinOnscreen : 0;
 
     const dailyChartSeries = getChartSeries(sessions);
+    const neckPostureChartSeries = getNeckPostureChartSeries(sessions);
+    const onScreenTimeChartSeries = getOnScreenTimeChartSeries(sessions);
+
+    const distanceCount = sessions.reduce((acc, s) => acc + (s.data.diatance?.badCount ?? 0), 0);
+    const neckBadCount = sessions.reduce((acc, s) => acc + (s.data.neck?.neckBadCount ?? 0), 0);
 
     // ==========================
     const payload = {
+      sessions,
+      startDate,
+      endDate,
       weekUsage,
       uniqueDays,
       sumHourUsage,
@@ -266,6 +308,36 @@ export const getThisWeekData = async (req: Request, res: Response) => {
       mostMsOnscreen,
       mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000,
       dailyChartSeries,
+      neckPostureChartSeries,
+      onScreenTimeChartSeries,
+      sumNotMove,
+      sumMaxSitting,
+      recommendations: [
+        {
+          type: 'blinkRisk',
+          info: getBlinkRisk(avgBlinkPerMin, 7),
+        },
+        {
+          type: 'distanceRisk',
+          info: getDistanceRisk(distanceCount, 7),
+        },
+        {
+          type: 'totalOnScreenRisk',
+          info: getOnscreenRisk(sumMinOnscreen, 7),
+        },
+        {
+          type: 'overMaxOnScreenRisk',
+          info: getSitMaxRisk(sumMaxSitting, 7),
+        },
+        {
+          type: 'neckRisk',
+          info: getNeckPostureRisk(neckBadCount, 7),
+        },
+        {
+          type: 'moveRisk',
+          info: getNotMoveRisk(sumNotMove, 7),
+        }
+      ],
     };
 
     res.status(200).json(payload);
@@ -315,6 +387,164 @@ export const getSessionsByDateOld = async (req: Request, res: Response) => {
   }
 };
 
+
+const getOnScreenTimeChartSeriesByHour = (sessions: SessionData[]): { x: string; y: number }[] => {
+  if (!sessions?.length) return [];
+
+  const onScreenTimeByHour = new Map<string, number>();
+
+  sessions.forEach(session => {
+    (session.data.sit?.sitted || []).forEach(sit => {
+      const start = moment(sit.start).tz("Asia/Bangkok");
+      const end = moment(sit.end).tz("Asia/Bangkok");
+      let current = start.clone();
+
+      while (current.isBefore(end)) {
+        const hour = current.format("HH:00");
+        const nextHour = current.clone().endOf('hour');
+        const diff = moment.min(end, nextHour).diff(current);
+        onScreenTimeByHour.set(hour, (onScreenTimeByHour.get(hour) ?? 0) + diff);
+        current = nextHour.add(1, 'millisecond');
+      }
+    });
+  });
+
+  const sortedByHour = Array.from(onScreenTimeByHour.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([x, y]) => ({ x, y: y / 60000 })); // convert ms to minutes
+
+  //fill data
+  const filledData = [];
+  for (let i = 0; i < 24; i++) {
+    const hour = i.toString().padStart(2, '0') + ':00';
+    const data = sortedByHour.find(d => d.x === hour);
+    if (data) {
+      filledData.push(data);
+    } else {
+      filledData.push({ x: hour, y: 0 });
+    }
+  }
+  return filledData
+
+};
+
+export const getTodayData = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
+    // thai timezone today
+    const startDate = moment.tz("Asia/Bangkok").startOf("day").toDate();
+    const endDate = moment.tz("Asia/Bangkok").endOf("day").toDate();
+
+    const sessions = await Session.find({
+      userId,
+      createdAt: { $gte: startDate, $lte: endDate },
+    }).sort({ createdAt: 1 });
+
+    if (!sessions.length) {
+      return res.status(404).json({ message: "No session found today" });
+    }
+
+
+    const todayUsage = sessions.length;
+
+    const sumHourUsage =
+      sessions.reduce((acc, s) => acc + ((s.data.endAt ?? 0) - (s.data.startAt ?? 0)), 0) / 3600000;
+
+    const sumNotMove = sessions.reduce((acc, s) => acc + (s.data.move.notMoveMaxCount ?? 0), 0);
+    const sumMaxSitting = sessions.reduce((acc, s) => acc + (s.data.sit.sitMaxTimeCount ?? 0), 0);
+
+    // sum on-screen time (hours)
+    const sumHourOnscreen =
+      sessions.reduce((acc, s) => {
+        const totalSitMs = (s.data.sit?.sitted || []).reduce(
+          (sum: number, sit: any) => sum + ((sit.end ?? 0) - (sit.start ?? 0)),
+          0
+        );
+        return acc + totalSitMs;
+      }, 0) / 3600000;
+
+
+    const onScreenObj = sessions.flatMap((s) =>
+      (s.data.sit?.sitted || []).map((sit: any) => ({
+        msDuration: (sit.end ?? 0) - (sit.start ?? 0),
+        start: sit.start ?? 0,
+        end: sit.end ?? 0,
+      }))
+    );
+
+    const mostMsOnscreen = onScreenObj.length
+      ? onScreenObj.reduce((max, cur) => (cur.msDuration > max.msDuration ? cur : max))
+      : { msDuration: 0, start: 0, end: 0 };
+
+    const sumMinOnscreen = sumHourOnscreen * 60;
+    const sumBlink = sessions.reduce((acc, s) => acc + (s.data.blinkCount ?? 0), 0);
+    const avgBlinkPerMin = sumMinOnscreen > 0 ? sumBlink / sumMinOnscreen : 0;
+
+    const dailyChartSeries = getChartSeries(sessions);
+    const neckPostureChartSeries = getNeckPostureChartSeries(sessions);
+    const onScreenTimeChartSeries = getOnScreenTimeChartSeriesByHour(sessions);
+
+    const distanceCount = sessions.reduce((acc, s) => acc + (s.data.diatance?.badCount ?? 0), 0);
+    const neckBadCount = sessions.reduce((acc, s) => acc + (s.data.neck?.neckBadCount ?? 0), 0);
+    // ==========================
+    const payload = {
+      sessions,
+      startDate,
+      endDate,
+      todayUsage,
+      sumHourUsage,
+      sumHourOnscreen,
+      sumMinOnscreen,
+      sumBlink,
+      avgBlinkPerMin,
+      recommendations: [
+        {
+          type: 'blinkRisk',
+          info: getBlinkRisk(avgBlinkPerMin, 1),
+        },
+        {
+          type: 'distanceRisk',
+          info: getDistanceRisk(distanceCount, 1),
+        },
+        {
+          type: 'totalOnScreenRisk',
+          info: getOnscreenRisk(sumMinOnscreen, 1),
+        },
+        {
+          type: 'overMaxOnScreenRisk',
+          info: getSitMaxRisk(sumMaxSitting, 1),
+        },
+        {
+          type: 'neckRisk',
+          info: getNeckPostureRisk(neckBadCount, 1),
+        },
+        {
+          type: 'moveRisk',
+          info: getNotMoveRisk(sumNotMove, 1),
+        }
+      ],
+      mostMsOnscreen,
+      mostMsOnscreenInHr: mostMsOnscreen.msDuration / 3600000,
+      dailyChartSeries,
+      neckPostureChartSeries,
+      onScreenTimeChartSeries,
+      sumNotMove,
+      sumMaxSitting
+    };
+
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error("Get today data error:", error);
+    res.status(500).json({
+      message: "Error getting today data",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
+};
 
 export const getSessionsByDate = async (req: Request, res: Response) => {
   try {
